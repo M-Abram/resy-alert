@@ -1,0 +1,15 @@
+[Unit]
+Description=Resy reservation monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/alert
+EnvironmentFile=/home/pi/alert/reserve.env
+ExecStart=/home/pi/alert/.venv/bin/python /home/pi/alert/reserve.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
