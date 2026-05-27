@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 playwright = "*"
+selenium = "*"
 
 [dev-packages]
 

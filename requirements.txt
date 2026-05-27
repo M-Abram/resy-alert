@@ -1,3 +1,4 @@
-# Use with a venv if you prefer not to use Pipenv:
-#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+# Default venv installs both backends (use BROWSER_BACKEND=selenium or playwright).
+# Jetson Selenium-only: pip install -r requirements-jetson.txt
 playwright>=1.40.0,<2
+selenium>=4.15.0,<5

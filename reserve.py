@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 import sys
 import threading
 import time
@@ -7,15 +8,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
-
-from playwright.sync_api import (
-    Browser,
-    Page,
-    Playwright,
-    TimeoutError as PlaywrightTimeoutError,
-    sync_playwright,
-)
+from typing import Any, Callable, List, Optional, Tuple
 
 DEFAULT_RESY_URL = (
     "https://resy.com/cities/new-york-ny/venues/eyval"
@@ -120,11 +113,39 @@ def print_availability(slot_count: int) -> None:
     print(f"{GREEN}{now}{RESET} {status}", flush=True)
 
 
-def configure_page(page: Page) -> None:
+def print_monitoring_banner(backend: str) -> None:
+    print(
+        f"Monitoring {get_restaurant_name()} every {WAIT_MIN_SECONDS}-{WAIT_MAX_SECONDS}s "
+        f"(browser restarts every {BROWSER_RECYCLE_EVERY} checks, backend={backend}). "
+        "Press Ctrl+C to stop.",
+        file=sys.stderr,
+    )
+
+
+def finalize_check_iteration(
+    available: bool,
+    slots: List[str],
+    was_available: Optional[bool],
+) -> bool:
+    if not available:
+        print_availability(0)
+        return False
+
+    print_availability(len(slots))
+    for slot in slots:
+        print(slot, flush=True)
+
+    if was_available is not True:
+        notify_slots_found(slots)
+
+    return True
+
+
+def configure_page_playwright(page: Any) -> None:
     if not BLOCK_MEDIA:
         return
 
-    def skip_heavy_assets(route, request) -> None:
+    def skip_heavy_assets(route: Any, request: Any) -> None:
         if request.resource_type in {"image", "media", "font"}:
             route.abort()
         else:
@@ -133,7 +154,9 @@ def configure_page(page: Page) -> None:
     page.route("**/*", skip_heavy_assets)
 
 
-def get_time_slots(page: Page) -> List[str]:
+def get_time_slots_playwright(page: Any) -> List[str]:
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
     try:
         page.wait_for_selector(
             TIME_BUTTON_SELECTOR, timeout=SLOT_WAIT_TIMEOUT_MS
@@ -152,14 +175,16 @@ def get_time_slots(page: Page) -> List[str]:
     return slots
 
 
-def check_availability(page: Page, resy_url: Optional[str] = None) -> Tuple[bool, List[str]]:
+def check_availability_playwright(
+    page: Any, resy_url: Optional[str] = None
+) -> Tuple[bool, List[str]]:
     url = resy_url or get_resy_url()
     page.goto(
         url,
         wait_until=PAGE_WAIT_UNTIL,
         timeout=PAGE_LOAD_TIMEOUT_MS,
     )
-    slots = get_time_slots(page)
+    slots = get_time_slots_playwright(page)
     return bool(slots), slots
 
 
@@ -205,18 +230,14 @@ def notify_slots_found(slots: List[str]) -> None:
         print(f"Failed to send ntfy notification: {error}", file=sys.stderr)
 
 
-def create_browser_session(playwright: Playwright) -> Tuple[Browser, Page]:
-    browser = playwright.chromium.launch(**chromium_launch_options())
+def create_browser_session(playwright: Any) -> Tuple[Any, Any]:
+    browser = playwright.chromium.launch(**chromium_launch_options_playwright())
     page = browser.new_page()
-    configure_page(page)
+    configure_page_playwright(page)
     return browser, page
 
 
 def linux_chromium_path() -> Optional[str]:
-    """
-    Resolved path passed to chromium.launch(executable_path=...) on Linux.
-    Prefer CHROMIUM_EXECUTABLE; otherwise first existing fallback path (e.g. Pi / Jetson apt packages).
-    """
     if sys.platform != "linux":
         return None
     if os.environ.get("USE_PLAYWRIGHT_BUNDLED_CHROMIUM", "").lower() in (
@@ -243,7 +264,35 @@ def linux_chromium_path() -> Optional[str]:
     return None
 
 
-def chromium_launch_options() -> dict:
+def system_chromium_executable_for_selenium() -> Optional[str]:
+    """Linux Chromium path for Selenium (ignores bundled-playwright flags)."""
+    if sys.platform != "linux":
+        return None
+    explicit = os.environ.get("CHROMIUM_EXECUTABLE", "").strip()
+    if explicit:
+        path = Path(explicit)
+        return str(path.resolve()) if path.is_file() else None
+    for candidate in LINUX_CHROMIUM_FALLBACK_PATHS:
+        path = Path(candidate)
+        if path.is_file():
+            return str(path.resolve())
+    return None
+
+
+def chromedriver_executable() -> Optional[str]:
+    explicit = os.environ.get("CHROMEDRIVER_PATH", "").strip()
+    if explicit:
+        return explicit if Path(explicit).is_file() else None
+    found = shutil.which("chromedriver")
+    return found
+
+
+def selenium_css_slot_selector() -> str:
+    """Plain CSS for slot buttons (Playwright also matches motion.div → div in DOM)."""
+    return "div.ReservationButton__time"
+
+
+def chromium_launch_options_playwright() -> dict:
     options: dict = {
         "headless": os.environ.get("HEADLESS", "true").lower() == "true",
     }
@@ -255,26 +304,14 @@ def chromium_launch_options() -> dict:
     return options
 
 
-def run_check(page: Page, was_available: Optional[bool]) -> bool:
+def run_check_playwright(page: Any, was_available: Optional[bool]) -> bool:
     blue = stderr_color("\033[94m")
     reset = stderr_reset()
     with TransientAnimation(
         lambda frame: f"{blue}Checking Website Now {frame}{reset}"
     ):
-        available, slots = check_availability(page)
-
-    if not available:
-        print_availability(0)
-        return False
-
-    print_availability(len(slots))
-    for slot in slots:
-        print(slot, flush=True)
-
-    if was_available is not True:
-        notify_slots_found(slots)
-
-    return True
+        available, slots = check_availability_playwright(page)
+    return finalize_check_iteration(available, slots, was_available)
 
 
 def random_wait_seconds() -> int:
@@ -292,14 +329,10 @@ def wait_with_countdown(seconds: int) -> None:
     clear_transient_status()
 
 
-def main() -> None:
-    load_reserve_env()
-    print(
-        f"Monitoring {get_restaurant_name()} every {WAIT_MIN_SECONDS}-{WAIT_MAX_SECONDS}s "
-        f"(browser restarts every {BROWSER_RECYCLE_EVERY} checks). "
-        "Press Ctrl+C to stop.",
-        file=sys.stderr,
-    )
+def main_playwright() -> None:
+    from playwright.sync_api import sync_playwright
+
+    print_monitoring_banner("playwright")
     was_available: Optional[bool] = None
     run_count = 0
 
@@ -309,7 +342,7 @@ def main() -> None:
             try:
                 while True:
                     run_count += 1
-                    was_available = run_check(page, was_available)
+                    was_available = run_check_playwright(page, was_available)
                     wait_with_countdown(random_wait_seconds())
                     if run_count % BROWSER_RECYCLE_EVERY == 0:
                         browser.close()
@@ -318,6 +351,19 @@ def main() -> None:
                 browser.close()
     except KeyboardInterrupt:
         print("\nStopped.", file=sys.stderr)
+
+
+def main() -> None:
+    load_reserve_env()
+    backend = os.environ.get("BROWSER_BACKEND", "playwright").strip().lower()
+    if backend == "selenium":
+        import importlib
+
+        selenium_mod = importlib.import_module("reserve_selenium")
+        selenium_mod.start_selenium_monitor()
+        return
+
+    main_playwright()
 
 
 if __name__ == "__main__":

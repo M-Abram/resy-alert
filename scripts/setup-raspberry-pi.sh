@@ -41,6 +41,11 @@ pipenv run playwright install-deps chromium
 echo "Installing Chromium for Playwright..."
 pipenv run playwright install chromium
 
+echo "Optional Jetson/rescue: use Selenium only (skip Playwright) —"
+echo "  pip uninstall -y playwright ; .venv/bin/pip install -r requirements-jetson.txt"
+echo "  sudo apt install -y chromium-chromedriver   # alongside chromium"
+echo "  echo BROWSER_BACKEND=selenium >> reserve.env"
+
 echo ""
 echo "Setup complete. Next steps:"
 echo "  1. Add pipenv to your PATH (if needed):"
