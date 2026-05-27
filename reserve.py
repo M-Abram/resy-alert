@@ -33,6 +33,12 @@ PAGE_LOAD_TIMEOUT_MS = int(os.environ.get("PAGE_LOAD_TIMEOUT_MS", "30000"))
 SLOT_WAIT_TIMEOUT_MS = int(os.environ.get("SLOT_WAIT_TIMEOUT_MS", "10000"))
 PAGE_WAIT_UNTIL = os.environ.get("PAGE_WAIT_UNTIL", "domcontentloaded")
 BLOCK_MEDIA = os.environ.get("BLOCK_MEDIA", "true").lower() == "true"
+LINUX_CHROMIUM_FALLBACK_PATHS = (
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome-stable",
+    "/snap/bin/chromium",
+)
 THINKING_FRAMES = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 THINKING_INTERVAL_SECONDS = 0.15
 
@@ -206,12 +212,46 @@ def create_browser_session(playwright: Playwright) -> Tuple[Browser, Page]:
     return browser, page
 
 
+def linux_chromium_path() -> Optional[str]:
+    """
+    Resolved path passed to chromium.launch(executable_path=...) on Linux.
+    Prefer CHROMIUM_EXECUTABLE; otherwise first existing fallback path (e.g. Pi / Jetson apt packages).
+    """
+    if sys.platform != "linux":
+        return None
+    if os.environ.get("USE_PLAYWRIGHT_BUNDLED_CHROMIUM", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return None
+    explicit = os.environ.get("CHROMIUM_EXECUTABLE", "").strip()
+    if explicit:
+        path = Path(explicit)
+        if path.is_file():
+            return str(path.resolve())
+        print(
+            f"CHROMIUM_EXECUTABLE not found: {explicit!r} — falling back "
+            "to Playwright-managed Chromium.",
+            file=sys.stderr,
+        )
+        return None
+    for candidate in LINUX_CHROMIUM_FALLBACK_PATHS:
+        path = Path(candidate)
+        if path.is_file():
+            return str(path.resolve())
+    return None
+
+
 def chromium_launch_options() -> dict:
     options: dict = {
         "headless": os.environ.get("HEADLESS", "true").lower() == "true",
     }
     if sys.platform == "linux":
         options["args"] = ["--disable-dev-shm-usage", "--disable-gpu"]
+        exe = linux_chromium_path()
+        if exe:
+            options["executable_path"] = exe
     return options
 
 

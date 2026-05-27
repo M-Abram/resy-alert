@@ -18,8 +18,11 @@ sudo apt-get install -y \
   python3 \
   python3-venv \
   python3-pip \
-  pipenv \
   git
+
+echo "Installing pipenv via pip..."
+python3 -m pip install --user --upgrade pip pipenv
+export PATH="$HOME/.local/bin:$PATH"
 
 if [[ ! -f "$ROOT/reserve.env" ]]; then
   cp "$ROOT/reserve.env.example" "$ROOT/reserve.env"
@@ -37,8 +40,11 @@ pipenv run playwright install chromium
 
 echo ""
 echo "Setup complete. Next steps:"
-echo "  1. Edit $ROOT/reserve.env"
-echo "  2. Test:  cd $ROOT && set -a && source reserve.env && set +a && .venv/bin/python reserve.py"
+echo "  1. Add pipenv to your PATH (if needed):"
+echo "       echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
+echo "  2. Edit $ROOT/reserve.env"
+echo "  3. Test:  cd $ROOT && set -a && source reserve.env && set +a && .venv/bin/python reserve.py"
+echo ""
 echo ""
 echo "Optional — run on boot with systemd:"
 echo "  sudo sed \"s|/home/pi/alert|$ROOT|g\" reserve.service | sudo tee /etc/systemd/system/reserve.service"
