@@ -1,0 +1,3 @@
+# Use with a venv if you prefer not to use Pipenv:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+playwright>=1.40.0,<2
